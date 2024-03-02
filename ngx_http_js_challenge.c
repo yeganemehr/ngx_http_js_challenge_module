@@ -33,7 +33,7 @@ typedef struct {
     ngx_str_t secret;
     ngx_str_t html_path;
     ngx_str_t title;
-    char *html;
+    ngx_str_t html;
 } ngx_http_js_challenge_loc_conf_t;
 
 static ngx_int_t ngx_http_js_challenge(ngx_conf_t *cf);
@@ -158,7 +158,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
     }
 
     if (conf->html_path.data == NULL) {
-        conf->html = NULL;
+        ngx_str_null(&conf->html);
     } else if (ngx_http_js_challenge_is_enabled(conf)) {
 
         // Read file in memory
@@ -177,13 +177,17 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
             return NGX_CONF_ERROR;
         }
 
-        conf->html = ngx_palloc(cf->pool, info.st_size);
-        int ret = read(fd, conf->html, info.st_size-1);
-        *(conf->html+ret) = '\0';
+        conf->html.data = ngx_palloc(cf->pool, info.st_size + 1);
+        conf->html.len = 0;
+        int ret;
+        while ((ret = read(fd, conf->html.data + conf->html.len, 4096)) > 0)
+        {
+            conf->html.len += ret;
+        }
+        *(conf->html.data + conf->html.len) = '\0';
         close(fd);
         if (ret < 0) {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "js_challenge_html: Could not read file '%s': %s", path,
-                               strerror(errno));
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "js_challenge_html: Could not read file '%s': %s", path, strerror(errno));
             return NGX_CONF_ERROR;
         }
     }
@@ -207,7 +211,7 @@ static void buf2hex(const unsigned char *buf, size_t buflen, char *hex_string) {
 }
 
 
-int serve_challenge(ngx_http_request_t *r, const char *challenge, const char *html, ngx_str_t title) {
+int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html, ngx_str_t title) {
 
     ngx_buf_t *b = ngx_pcalloc(r->pool, sizeof(ngx_buf_t));
     ngx_chain_t out;
@@ -220,14 +224,18 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, const char *ht
     memcpy(title_c_str, title.data, title.len);
     *(title_c_str + title.len) = '\0';
 
-    unsigned char buf[32768];
+    
     static const ngx_str_t content_type = ngx_string("text/html;charset=utf-8");
 
-    if (html == NULL) {
-        html = "<h2>Set the <code>js_challenge_html /path/to/body.html;</code> directive to change this page.</h2>";
+    if (html.data == NULL) {
+        ngx_str_set(&html, "<h2>Set the <code>js_challenge_html /path/to/body.html;</code> directive to change this page.</h2>");
     }
 
-    size_t size = snprintf((char *) buf, sizeof(buf), JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html);
+    size_t size_of_buf = sizeof(JS_SOLVER_TEMPLATE) + title.len + html.len + SHA1_STR_LEN;
+    unsigned char *buf = (unsigned char *)malloc(size_of_buf);
+
+
+    size_t size = snprintf((char *) buf, size_of_buf, JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html);
 
     out.buf = b;
     out.next = NULL;
@@ -245,6 +253,8 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, const char *ht
 
     ngx_http_output_filter(r, &out);
     ngx_http_finalize_request(r, 0);
+    free(buf);
+
     return NGX_DONE;
 }
 

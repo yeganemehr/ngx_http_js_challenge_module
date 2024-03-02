@@ -28,7 +28,8 @@
 #define DEFAULT_TITLE "Verifying your browser..."
 
 typedef struct {
-    ngx_str_t enabled;
+    ngx_array_t *enabled_lengths;
+    ngx_array_t *enabled_values;
     ngx_uint_t bucket_duration;
     ngx_str_t secret;
     ngx_str_t html_path;
@@ -44,20 +45,50 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 
 static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 
-static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_js_challenge_loc_conf_t *conf) {
-    return conf->enabled.len == 2 && (ngx_strncasecmp(conf->enabled.data, (u_char *)"on", 2) == 0);
+static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_request_t *r, ngx_http_js_challenge_loc_conf_t *conf)
+{
+    ngx_str_t result;
+    ngx_http_script_run(r, &result, conf->enabled_lengths->elts, 0, conf->enabled_values->elts);
+    return result.len == 2 && (ngx_strncasecmp(result.data, (u_char *)"on", 2) == 0);
 }
 
 unsigned char *__sha1(const unsigned char *d, size_t n, unsigned char *md);
+
+static char *ngx_conf_set_enabled_slot(ngx_conf_t *cf, ngx_command_t *command, void *conf)
+{
+    ngx_http_js_challenge_loc_conf_t *loc_conf;
+    ngx_str_t *value;
+    ngx_str_t *enabled;
+    ngx_http_script_compile_t script_compile;
+
+    loc_conf = conf;
+    value = cf->args->elts;
+    enabled = &value[1];
+
+    ngx_memzero(&script_compile, sizeof(ngx_http_script_compile_t));
+    script_compile.cf = cf;
+    script_compile.source = enabled;
+    script_compile.lengths = &loc_conf->enabled_lengths;
+    script_compile.values = &loc_conf->enabled_values;
+    script_compile.variables = ngx_http_script_variables_count(enabled);
+    script_compile.complete_lengths = 1;
+    script_compile.complete_values = 1;
+
+    if (ngx_http_script_compile(&script_compile) != NGX_OK){
+        return NGX_CONF_ERROR;
+    }
+
+    return NGX_CONF_OK;
+}
 
 static ngx_command_t ngx_http_js_challenge_commands[] = {
 
         {
                 ngx_string("js_challenge"),
                 NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_HTTP_SIF_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
-                ngx_conf_set_str_slot,
+                ngx_conf_set_enabled_slot,
                 NGX_HTTP_LOC_CONF_OFFSET,
-                offsetof(ngx_http_js_challenge_loc_conf_t, enabled),
+                0,
                 NULL
         },
         {
@@ -136,7 +167,6 @@ static void *ngx_http_js_challenge_create_loc_conf(ngx_conf_t *cf) {
 
     conf->secret = (ngx_str_t) {0, NULL};
     conf->bucket_duration = NGX_CONF_UNSET_UINT;
-    conf->enabled = (ngx_str_t){0, NULL};
 
     return conf;
 }
@@ -146,8 +176,17 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
     ngx_http_js_challenge_loc_conf_t *prev = parent;
     ngx_http_js_challenge_loc_conf_t *conf = child;
 
+    if (conf->enabled_lengths == NULL)
+    {
+        conf->enabled_lengths = prev->enabled_lengths;
+        conf->enabled_values = prev->enabled_values;
+    }
+
+
+    ngx_conf_merge_ptr_value(conf->enabled_lengths, prev->enabled_lengths, NULL)
+    ngx_conf_merge_ptr_value(conf->enabled_values, prev->enabled_values, NULL)
+
     ngx_conf_merge_uint_value(conf->bucket_duration, prev->bucket_duration, 3600)
-    ngx_conf_merge_str_value(conf->enabled, prev->enabled, "off")
     ngx_conf_merge_str_value(conf->secret, prev->secret, DEFAULT_SECRET)
     ngx_conf_merge_str_value(conf->html_path, prev->html_path, NULL)
     ngx_conf_merge_str_value(conf->title, prev->title, DEFAULT_TITLE)
@@ -159,7 +198,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 
     if (conf->html_path.data == NULL) {
         ngx_str_null(&conf->html);
-    } else if (ngx_http_js_challenge_is_enabled(conf)) {
+    } else {
 
         // Read file in memory
         char path[PATH_MAX];
@@ -352,7 +391,7 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r) {
 
     ngx_http_js_challenge_loc_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_js_challenge_module);
 
-    if (!ngx_http_js_challenge_is_enabled(conf)) {
+    if (!ngx_http_js_challenge_is_enabled(r, conf)) {
         return NGX_DECLINED;
     }
 

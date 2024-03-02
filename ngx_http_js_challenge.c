@@ -235,7 +235,7 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html
     unsigned char *buf = (unsigned char *)malloc(size_of_buf);
 
 
-    size_t size = snprintf((char *) buf, size_of_buf, JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html);
+    size_t size = snprintf((char *) buf, size_of_buf, JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html.data);
 
     out.buf = b;
     out.next = NULL;

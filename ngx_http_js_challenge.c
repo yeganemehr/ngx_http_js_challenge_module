@@ -28,7 +28,7 @@
 #define DEFAULT_TITLE "Verifying your browser..."
 
 typedef struct {
-    ngx_flag_t enabled;
+    ngx_str_t enabled;
     ngx_uint_t bucket_duration;
     ngx_str_t secret;
     ngx_str_t html_path;
@@ -44,6 +44,10 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 
 static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 
+static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_js_challenge_loc_conf_t *conf) {
+    return conf->enabled.len && ngx_strncasecmp(conf->enabled.data, "on", 2);
+}
+
 unsigned char *__sha1(const unsigned char *d, size_t n, unsigned char *md);
 
 static ngx_command_t ngx_http_js_challenge_commands[] = {
@@ -51,7 +55,7 @@ static ngx_command_t ngx_http_js_challenge_commands[] = {
         {
                 ngx_string("js_challenge"),
                 NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_HTTP_SIF_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_FLAG,
-                ngx_conf_set_flag_slot,
+                ngx_conf_set_str_slot,
                 NGX_HTTP_LOC_CONF_OFFSET,
                 offsetof(ngx_http_js_challenge_loc_conf_t, enabled),
                 NULL
@@ -132,7 +136,7 @@ static void *ngx_http_js_challenge_create_loc_conf(ngx_conf_t *cf) {
 
     conf->secret = (ngx_str_t) {0, NULL};
     conf->bucket_duration = NGX_CONF_UNSET_UINT;
-    conf->enabled = NGX_CONF_UNSET;
+    conf->enabled = (ngx_str_t){0, NULL};
 
     return conf;
 }
@@ -143,7 +147,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
     ngx_http_js_challenge_loc_conf_t *conf = child;
 
     ngx_conf_merge_uint_value(conf->bucket_duration, prev->bucket_duration, 3600)
-    ngx_conf_merge_value(conf->enabled, prev->enabled, 0)
+    ngx_conf_merge_str_value(conf->enabled, prev->enabled, "off")
     ngx_conf_merge_str_value(conf->secret, prev->secret, DEFAULT_SECRET)
     ngx_conf_merge_str_value(conf->html_path, prev->html_path, NULL)
     ngx_conf_merge_str_value(conf->title, prev->title, DEFAULT_TITLE)
@@ -155,7 +159,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 
     if (conf->html_path.data == NULL) {
         conf->html = NULL;
-    } else if (conf->enabled) {
+    } else if (ngx_http_js_challenge_is_enabled(conf)) {
 
         // Read file in memory
         char path[PATH_MAX];
@@ -338,7 +342,7 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r) {
 
     ngx_http_js_challenge_loc_conf_t *conf = ngx_http_get_module_loc_conf(r, ngx_http_js_challenge_module);
 
-    if (!conf->enabled) {
+    if (!ngx_http_js_challenge_is_enabled(conf)) {
         return NGX_DECLINED;
     }
 

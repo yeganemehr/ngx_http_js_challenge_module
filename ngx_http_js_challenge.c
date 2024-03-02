@@ -48,7 +48,11 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_request_t *r, ngx_http_js_challenge_loc_conf_t *conf)
 {
     ngx_str_t result;
-    ngx_http_script_run(r, &result, conf->enabled_lengths->elts, 0, conf->enabled_values->elts);
+    if (conf->enabled_lengths == NULL) {
+        ngx_str_set(&result, "off");
+    } else {
+       ngx_http_script_run(r, &result, conf->enabled_lengths->elts, 0, conf->enabled_values->elts);
+    }
     return result.len == 2 && (ngx_strncasecmp(result.data, (u_char *)"on", 2) == 0);
 }
 

@@ -45,7 +45,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 
 static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_js_challenge_loc_conf_t *conf) {
-    return conf->enabled.len && (ngx_strncasecmp(conf->enabled.data, (u_char *)"on", 2) == 0);
+    return conf->enabled.len == 2 && (ngx_strncasecmp(conf->enabled.data, (u_char *)"on", 2) == 0);
 }
 
 unsigned char *__sha1(const unsigned char *d, size_t n, unsigned char *md);
@@ -54,7 +54,7 @@ static ngx_command_t ngx_http_js_challenge_commands[] = {
 
         {
                 ngx_string("js_challenge"),
-                NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_HTTP_SIF_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_FLAG,
+                NGX_HTTP_LOC_CONF | NGX_HTTP_LIF_CONF | NGX_HTTP_SIF_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
                 ngx_conf_set_str_slot,
                 NGX_HTTP_LOC_CONF_OFFSET,
                 offsetof(ngx_http_js_challenge_loc_conf_t, enabled),

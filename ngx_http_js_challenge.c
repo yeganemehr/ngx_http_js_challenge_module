@@ -45,7 +45,7 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
 static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 
 static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_js_challenge_loc_conf_t *conf) {
-    return conf->enabled.len && ngx_strncasecmp(conf->enabled.data, (u_char *)"on", 2);
+    return conf->enabled.len && (ngx_strncasecmp(conf->enabled.data, (u_char *)"on", 2) == 0);
 }
 
 unsigned char *__sha1(const unsigned char *d, size_t n, unsigned char *md);

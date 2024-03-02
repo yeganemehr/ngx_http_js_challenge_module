@@ -182,10 +182,6 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
         conf->enabled_values = prev->enabled_values;
     }
 
-
-    ngx_conf_merge_ptr_value(conf->enabled_lengths, prev->enabled_lengths, NULL)
-    ngx_conf_merge_ptr_value(conf->enabled_values, prev->enabled_values, NULL)
-
     ngx_conf_merge_uint_value(conf->bucket_duration, prev->bucket_duration, 3600)
     ngx_conf_merge_str_value(conf->secret, prev->secret, DEFAULT_SECRET)
     ngx_conf_merge_str_value(conf->html_path, prev->html_path, NULL)

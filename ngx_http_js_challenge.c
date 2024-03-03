@@ -286,12 +286,11 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html
     }
 
     size_t size_of_buf = sizeof(JS_SOLVER_TEMPLATE) + title.len + html.len + SHA1_STR_LEN;
-    unsigned char *buf = (unsigned char *)malloc(size_of_buf);
-
+    unsigned char *buf = (unsigned char *)ngx_pcalloc(r->pool, size_of_buf);
 
     size_t size = snprintf((char *) buf, size_of_buf, JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html.data);
 
-    ngx_free(html.data);
+    ngx_pfree(r->pool, html.data);
     ngx_str_null(&html);
 
     out.buf = b;
@@ -310,7 +309,7 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html
 
     ngx_http_output_filter(r, &out);
     ngx_http_finalize_request(r, 0);
-    free(buf);
+    ngx_pfree(r->pool, buf);
 
     return NGX_DONE;
 }

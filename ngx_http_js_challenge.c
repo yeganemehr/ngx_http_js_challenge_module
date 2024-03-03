@@ -25,17 +25,66 @@
         "</body>" \
         "</html>"
 
-#define DEFAULT_TITLE "Verifying your browser..."
+
+#define script_slot_setter(name) static char *ngx_conf_set_##name##_slot(ngx_conf_t *cf, ngx_command_t *command, void *conf) \
+{ \
+    ngx_http_js_challenge_loc_conf_t *loc_conf;\
+    ngx_str_t *value;\
+    ngx_str_t *raw;\
+    ngx_http_script_compile_t script_compile; \
+    loc_conf = conf; \
+    value = cf->args->elts; \
+    raw = &value[1]; \
+    ngx_memzero(&script_compile, sizeof(ngx_http_script_compile_t)); \
+    script_compile.cf = cf; \
+    script_compile.source = raw; \
+    script_compile.lengths = &loc_conf->name##_lengths; \
+    script_compile.values = &loc_conf->name##_values; \
+    script_compile.variables = ngx_http_script_variables_count(raw); \
+    script_compile.complete_lengths = 1; \
+    script_compile.complete_values = 1; \
+    if (ngx_http_script_compile(&script_compile) != NGX_OK){ \
+        return NGX_CONF_ERROR; \
+    } \
+    return NGX_CONF_OK; \
+}
+
+#define script_slot_getter(name) static ngx_str_t ngx_http_js_challenge_get_##name(ngx_http_request_t *r, ngx_http_js_challenge_loc_conf_t *conf) \
+{ \
+    ngx_str_t result; \
+    if (conf->enabled_lengths == NULL) { \
+        ngx_str_null(&result); \
+    } else { \
+       ngx_http_script_run(r, &result, conf->name##_lengths->elts, 0, conf->name##_values->elts); \
+    } \
+    return result; \
+}
+
+#define script_slot_merger(name) if (conf->name##_lengths == NULL)\
+    {\
+        conf->name##_lengths = prev->name##_lengths;\
+        conf->name##_values = prev->name##_values;\
+    }
+
 
 typedef struct {
     ngx_array_t *enabled_lengths;
     ngx_array_t *enabled_values;
     ngx_uint_t bucket_duration;
     ngx_str_t secret;
-    ngx_str_t html_path;
-    ngx_str_t title;
-    ngx_str_t html;
+    ngx_array_t *html_path_values;
+    ngx_array_t *html_path_lengths;
+    ngx_array_t *title_values;
+    ngx_array_t *title_lengths;
 } ngx_http_js_challenge_loc_conf_t;
+
+
+script_slot_setter(enabled);
+script_slot_setter(html_path);
+script_slot_setter(title);
+script_slot_getter(enabled);
+script_slot_getter(html_path);
+script_slot_getter(title);
 
 static ngx_int_t ngx_http_js_challenge(ngx_conf_t *cf);
 
@@ -47,43 +96,48 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r);
 
 static ngx_flag_t ngx_http_js_challenge_is_enabled(ngx_http_request_t *r, ngx_http_js_challenge_loc_conf_t *conf)
 {
-    ngx_str_t result;
-    if (conf->enabled_lengths == NULL) {
-        ngx_str_set(&result, "off");
-    } else {
-       ngx_http_script_run(r, &result, conf->enabled_lengths->elts, 0, conf->enabled_values->elts);
-    }
+    ngx_str_t result = ngx_http_js_challenge_get_enabled(r, conf);
     return result.len == 2 && (ngx_strncasecmp(result.data, (u_char *)"on", 2) == 0);
+}
+
+static ngx_str_t ngx_http_js_challenge_get_html(ngx_http_request_t *r, ngx_http_js_challenge_loc_conf_t *conf) {
+    ngx_str_t path = ngx_http_js_challenge_get_html_path(r, conf);
+    ngx_str_t result;
+    if (path.len == 0) {
+        ngx_str_set(&result, "<h2>Set the <code>js_challenge_html /path/to/body.html;</code> directive to change this page.</h2>");
+        return result;
+    }
+
+    char c_path[PATH_MAX];
+    memcpy(c_path, path.data, path.len);
+    *(c_path + path.len) = '\0';
+
+    struct stat info;
+    stat(c_path, &info);
+
+    int fd = open(c_path, O_RDONLY, 0);
+    if (fd < 0)
+    {
+        close(fd);
+        ngx_str_set(&result, "Cannot read js_challenge_html");
+        return result;
+    }
+
+    result.data = ngx_palloc(r->pool, info.st_size + 1);
+    result.len = 0;
+    int ret;
+    while ((ret = read(fd, result.data + result.len, 4096)) > 0)
+    {
+        result.len += ret;
+    }
+    *(result.data + result.len) = '\0';
+    close(fd);
+    
+    return result;
 }
 
 unsigned char *__sha1(const unsigned char *d, size_t n, unsigned char *md);
 
-static char *ngx_conf_set_enabled_slot(ngx_conf_t *cf, ngx_command_t *command, void *conf)
-{
-    ngx_http_js_challenge_loc_conf_t *loc_conf;
-    ngx_str_t *value;
-    ngx_str_t *enabled;
-    ngx_http_script_compile_t script_compile;
-
-    loc_conf = conf;
-    value = cf->args->elts;
-    enabled = &value[1];
-
-    ngx_memzero(&script_compile, sizeof(ngx_http_script_compile_t));
-    script_compile.cf = cf;
-    script_compile.source = enabled;
-    script_compile.lengths = &loc_conf->enabled_lengths;
-    script_compile.values = &loc_conf->enabled_values;
-    script_compile.variables = ngx_http_script_variables_count(enabled);
-    script_compile.complete_lengths = 1;
-    script_compile.complete_values = 1;
-
-    if (ngx_http_script_compile(&script_compile) != NGX_OK){
-        return NGX_CONF_ERROR;
-    }
-
-    return NGX_CONF_OK;
-}
 
 static ngx_command_t ngx_http_js_challenge_commands[] = {
 
@@ -113,18 +167,18 @@ static ngx_command_t ngx_http_js_challenge_commands[] = {
         },
         {
                 ngx_string("js_challenge_html"),
-                NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
-                ngx_conf_set_str_slot,
+                NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LIF_CONF | NGX_CONF_TAKE1,
+                ngx_conf_set_html_path_slot,
                 NGX_HTTP_LOC_CONF_OFFSET,
-                offsetof(ngx_http_js_challenge_loc_conf_t, html_path),
+                0,
                 NULL
         },
         {
                 ngx_string("js_challenge_title"),
                 NGX_HTTP_LOC_CONF | NGX_HTTP_SRV_CONF | NGX_CONF_TAKE1,
-                ngx_conf_set_str_slot,
+                ngx_conf_set_title_slot,
                 NGX_HTTP_LOC_CONF_OFFSET,
-                offsetof(ngx_http_js_challenge_loc_conf_t, title),
+                0,
                 NULL
         },
         ngx_null_command
@@ -180,55 +234,16 @@ static char *ngx_http_js_challenge_merge_loc_conf(ngx_conf_t *cf, void *parent, 
     ngx_http_js_challenge_loc_conf_t *prev = parent;
     ngx_http_js_challenge_loc_conf_t *conf = child;
 
-    if (conf->enabled_lengths == NULL)
-    {
-        conf->enabled_lengths = prev->enabled_lengths;
-        conf->enabled_values = prev->enabled_values;
-    }
+    script_slot_merger(enabled);
+    script_slot_merger(html_path);
+    script_slot_merger(title);
 
     ngx_conf_merge_uint_value(conf->bucket_duration, prev->bucket_duration, 3600)
     ngx_conf_merge_str_value(conf->secret, prev->secret, DEFAULT_SECRET)
-    ngx_conf_merge_str_value(conf->html_path, prev->html_path, NULL)
-    ngx_conf_merge_str_value(conf->title, prev->title, DEFAULT_TITLE)
 
     if (conf->bucket_duration < 1) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "bucket_duration must be equal or more than 1");
         return NGX_CONF_ERROR;
-    }
-
-    if (conf->html_path.data == NULL) {
-        ngx_str_null(&conf->html);
-    } else {
-
-        // Read file in memory
-        char path[PATH_MAX];
-        memcpy(path, conf->html_path.data, conf->html_path.len);
-        *(path + conf->html_path.len) = '\0';
-
-        struct stat info;
-        stat(path, &info);
-
-        int fd = open(path, O_RDONLY, 0);
-        if (fd < 0) {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "js_challenge_html: Could not open file '%s': %s", path,
-                               strerror(errno));
-            close(fd);
-            return NGX_CONF_ERROR;
-        }
-
-        conf->html.data = ngx_palloc(cf->pool, info.st_size + 1);
-        conf->html.len = 0;
-        int ret;
-        while ((ret = read(fd, conf->html.data + conf->html.len, 4096)) > 0)
-        {
-            conf->html.len += ret;
-        }
-        *(conf->html.data + conf->html.len) = '\0';
-        close(fd);
-        if (ret < 0) {
-            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "js_challenge_html: Could not read file '%s': %s", path, strerror(errno));
-            return NGX_CONF_ERROR;
-        }
     }
 
     return NGX_CONF_OK;
@@ -275,6 +290,9 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html
 
 
     size_t size = snprintf((char *) buf, size_of_buf, JS_SOLVER_TEMPLATE, title_c_str, challenge_c_str, html.data);
+
+    ngx_free(html.data);
+    ngx_str_null(&html);
 
     out.buf = b;
     out.next = NULL;
@@ -394,6 +412,8 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r) {
     if (!ngx_http_js_challenge_is_enabled(r, conf)) {
         return NGX_DECLINED;
     }
+    ngx_str_t html = ngx_http_js_challenge_get_html(r, conf);
+    ngx_str_t title = ngx_http_js_challenge_get_title(r, conf);
 
     unsigned long bucket = r->start_sec - (r->start_sec % conf->bucket_duration);
     ngx_str_t addr = r->connection->addr_text;
@@ -406,15 +426,15 @@ static ngx_int_t ngx_http_js_challenge_handler(ngx_http_request_t *r) {
     int ret = get_cookie(r, &cookie_name, &response);
 
     if (ret < 0) {
-         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "[ js challenge log ] sending challenge... ");
-         return serve_challenge(r, challenge, conf->html, conf->title);
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "[ js challenge log ] sending challenge... ");
+        return serve_challenge(r, challenge, html, title);
     }
 
     get_challenge_string(bucket, addr, conf->secret, challenge);
 
     if (verify_response(response, challenge) != 0) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "[ js challenge log ] wrong/expired cookie (res=%s), sending challenge...", response.data);
-        return serve_challenge(r, challenge, conf->html, conf->title);
+        return serve_challenge(r, challenge, html, title);
     }
 
     // Fallthrough next handler

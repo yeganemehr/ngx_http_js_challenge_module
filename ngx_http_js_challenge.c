@@ -309,7 +309,6 @@ int serve_challenge(ngx_http_request_t *r, const char *challenge, ngx_str_t html
 
     ngx_http_output_filter(r, &out);
     ngx_http_finalize_request(r, 0);
-    ngx_pfree(r->pool, buf);
 
     return NGX_DONE;
 }
